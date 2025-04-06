@@ -1,175 +1,232 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import "./App.css";
+import { checkSupplierRisk } from "./utils/checkSupplierRisk";
 
-const MAPBOX_API_KEY = "pk.eyJ1IjoiZGVtb3VzZXIiLCJhIjoiY2ttZ2o4bzJkMDNiaTJ2bXgyMmRvMmE0ciJ9.4wSD8T3CvU98Ers90HgY9Q";
-const OPENCAGE_API_KEY = "4c8e43a81239456dba8f739a2c3e90b1"; 
-const AISHUB_API_KEY = "demo";
+const OPENCAGE_API_KEY = "d9d4039b0b1b4b949a72159b39c3f6e0";
+const MAPBOX_API_KEY = "pk.eyJ1IjoicmpheWFzcmVlIiwiYSI6ImNtOTUyaWd0dDBzdzIycnIwYWN6bGhnY3kifQ.ra8FahCLmvIsmnwBCePOdw";
 
-const App = () => {
-  const [portName, setPortName] = useState("");
-  const [portCoords, setPortCoords] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [shipCount, setShipCount] = useState(null);
+function App() {
+  const [activeTab, setActiveTab] = useState("congestion");
+  const [port, setPort] = useState("");
+  const [coords, setCoords] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [congestionStatus, setCongestionStatus] = useState(null);
+  const [satelliteImageUrl, setSatelliteImageUrl] = useState(null);
+  const [supplierName, setSupplierName] = useState("");
+  const [supplierLocation, setSupplierLocation] = useState("");
+  const [supplierLoading, setSupplierLoading] = useState(false);
+  const [supplierRisk, setSupplierRisk] = useState(null);
+  const [news, setNews] = useState([]);
+  const [trendingProducts, setTrendingProducts] = useState([]);
+  const [demandLoading, setDemandLoading] = useState(false);
 
-  const getAISData = async (lat, lng) => {
-    const radius = 50;
-    const response = await fetch(
-      `https://api.aishub.net/ws.php?username=demo&format=1&output=json&lat=${lat}&lon=${lng}&radius=${radius}&apikey=${AISHUB_API_KEY}`
-    );
-    const data = await response.json();
-    return data.vessels?.length || 0;
-  };
-
-  const getSuggestedReroutes = async (lat, lng) => {
-    const haversineDistance = (lat1, lon1, lat2, lon2) => {
-      const toRad = (x) => (x * Math.PI) / 180;
-      const R = 6371;
-      const dLat = toRad(lat2 - lat1);
-      const dLon = toRad(lon2 - lon1);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-    };
-  
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search.php?q=port&lat=${lat}&lon=${lng}&format=jsonv2`
-      );
-      const data = await response.json();
-  
-      const nearbyPorts = data
-        .filter((place) => place.class === "place" || place.type.includes("harbour") || place.type.includes("port"))
-        .map((port) => ({
-          name: port.display_name,
-          lat: parseFloat(port.lat),
-          lng: parseFloat(port.lon),
-          distance: haversineDistance(lat, lng, port.lat, port.lon),
-        }))
-        .filter((port) => port.distance > 100)
-        .sort((a, b) => a.distance - b.distance);
-  
-      return nearbyPorts.slice(0, 2);
-    } catch (error) {
-      console.error("Error fetching reroute ports:", error);
-      return [];
-    }
-  };
-  
-
-  const getMapboxImageUrl = () => {
-    if (!portCoords) return null;
-    const { lat, lng } = portCoords;
-    return `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/${lng},${lat},9,0/600x400?access_token=${MAPBOX_API_KEY}`;
-  };
-
-  const handleSubmit = async (e) => {
+  const handlePortCheck = async (e) => {
     e.preventDefault();
+    setCoords(null);
     setError("");
-    setStatus(null);
-    setPortCoords(null);
-    setShipCount(null);
-
-    if (!portName.trim()) {
-      setError("Please enter a port name.");
-      return;
-    }
+    setCongestionStatus(null);
+    setSatelliteImageUrl(null);
+    setLoading(true);
 
     try {
-      const geoRes = await fetch(
+      const res = await fetch(
         `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(
-          portName
+          port
         )}&key=${OPENCAGE_API_KEY}`
       );
-      const geoData = await geoRes.json();
+      const data = await res.json();
 
-      if (!geoData.results.length) {
+      if (!data.results || data.results.length === 0) {
         setError("Port not found.");
+        setLoading(false);
         return;
       }
 
-      const { lat, lng } = geoData.results[0].geometry;
-      setPortCoords({ lat, lng });
+      const { lat, lng } = data.results[0].geometry;
+      setCoords({ lat, lng });
 
-      let shipsNearby = 0;
-      shipsNearby = await getAISData(lat, lng);
-      setShipCount(shipsNearby);
+      const normalized = port.toLowerCase().trim();
+      const status = congestionData[normalized];
 
-      let congestionLevel = "normal";
-      let message = "✅ Port looks good. No congestion detected.";
-
-      if (shipsNearby > 80) {
-        congestionLevel = "high";
-        message = "🔴 Highly Congested — Must Reroute!";
-      } else if (shipsNearby > 40) {
-        congestionLevel = "moderate";
-        message = "🟠 Congested — Consider Rerouting";
+      if (status) {
+        if (status.status === "highly_congested") {
+          setCongestionStatus({
+            congested: true,
+            severity: "high",
+            reroute: status.reroute,
+          });
+        } else if (status.status === "congested") {
+          setCongestionStatus({
+            congested: true,
+            severity: "moderate",
+            reroute: status.reroute,
+          });
+        }
+      } else {
+        setCongestionStatus({
+          congested: false,
+          severity: "none",
+          reroute: null,
+        });
       }
 
-      let reroutes = [];
-      if (congestionLevel !== "normal") {
-        reroutes = getSuggestedReroutes(lat, lng);
-      }
-
-      setStatus({ level: congestionLevel, message, reroutes });
+      const mapboxImageUrl = `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/${lng},${lat},12,0/600x400?access_token=${MAPBOX_API_KEY}`;
+      setSatelliteImageUrl(mapboxImageUrl);
     } catch (err) {
-      setError("Something went wrong. Try again later.");
+      console.error(err);
+      setError("Error fetching coordinates.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSupplierCheck = async (e) => {
+    e.preventDefault();
+    setSupplierLoading(true);
+    setSupplierRisk(null);
+    setNews([]);
+
+    try {
+      const result = await checkSupplierRisk(supplierName, supplierLocation);
+      setSupplierRisk(result.risk);
+      setNews(result.articles || []);
+    } catch (err) {
+      console.error("Supplier risk check failed:", err);
+    } finally {
+      setSupplierLoading(false);
+    }
+  };
+
+  const handleDemandSurge = async () => {
+    setDemandLoading(true);
+    setTrendingProducts([]);
+    try {
+      // Simulated trending data
+      const simulatedTrends = [
+        { name: "Electric Scooters", score: 93 },
+        { name: "Solar Panels", score: 88 },
+        { name: "Smart Watches", score: 74 },
+        { name: "Protein Powders", score: 60 },
+        { name: "Plant-Based Meat", score: 91 },
+      ];
+      setTrendingProducts(simulatedTrends);
+    } catch (err) {
+      console.error("Failed to fetch trends");
+    } finally {
+      setDemandLoading(false);
     }
   };
 
   return (
-    <div className="app-container">
-      <h1>📦 Supply Chain Early Warning System</h1>
-      <form className="form" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          placeholder="Enter Port Name (e.g. Port of Singapore)"
-          value={portName}
-          onChange={(e) => setPortName(e.target.value)}
-        />
-        <button type="submit">Check Congestion</button>
-      </form>
+    <>
+      <div className="topbar">
+        <h1>🌍 Supply Chain Early Warning System</h1>
+        <div className="tabs">
+          <button className={activeTab === "congestion" ? "active" : ""} onClick={() => setActiveTab("congestion")}>Port Congestion</button>
+          <button className={activeTab === "supplier" ? "active" : ""} onClick={() => setActiveTab("supplier")}>Supplier Failure</button>
+          <button className={activeTab === "demand" ? "active" : ""} onClick={() => setActiveTab("demand")}>Demand Surge</button>
+        </div>
+      </div>
 
-      {error && <div className="error">{error}</div>}
+      <div className="app-container">
+        <div className="main-card">
+          {/* Port Congestion */}
+          {activeTab === "congestion" && (
+            <div className="tab-content">
+              <form onSubmit={handlePortCheck} className="form">
+                <input type="text" placeholder="Enter a port name (e.g., Port of Shanghai)" value={port} onChange={(e) => setPort(e.target.value)} required />
+                <button type="submit" disabled={loading}>{loading ? "Checking..." : "Check Port"}</button>
+              </form>
 
-      {status && (
-        <div className="result-card">
-          <h2>📍 {portName}</h2>
-          <h3 className={status.level}>{status.message}</h3>
-          <p>🚢 Ship Count: {shipCount}</p>
+              {error && <p className="error">{error}</p>}
 
-          {status.reroutes?.length > 0 && (
-            <div className="reroute-section">
-              <h4>🚢 Suggested Reroutes</h4>
-              <ul>
-                {status.reroutes.map((port, index) => (
-                  <li key={index}>
-                    {port.name} ({port.distance.toFixed(1)} km away)
-                  </li>
-                ))}
-              </ul>
+              {coords && (
+                <div className="result-card">
+                  <h2>📍 Location</h2>
+                  <p>Latitude: {coords.lat}</p>
+                  <p>Longitude: {coords.lng}</p>
+
+                  <h3>🚦 Congestion Status</h3>
+                  {congestionStatus?.severity === "high" && <p className="high">🔴 Highly Congested — Must Reroute</p>}
+                  {congestionStatus?.severity === "moderate" && <p className="moderate">🟠 Congested — Consider Rerouting</p>}
+                  {congestionStatus?.severity === "none" && <p className="normal">✅ Port looks good. No congestion detected.</p>}
+
+                  {congestionStatus?.reroute && <p className="suggestion">🔄 Suggested reroute: <strong>{congestionStatus.reroute}</strong></p>}
+
+                  {satelliteImageUrl && (
+                    <div className="satellite">
+                      <h3>🛰️ Satellite View (Mapbox)</h3>
+                      <img src={satelliteImageUrl} alt="Satellite of port" />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
-          {portCoords && (
-            <>
-              <h4>🛰️ Satellite View</h4>
-              <img
-                className="satellite-img"
-                src={getMapboxImageUrl()}
-                alt="Satellite view"
-              />
-              <p className="coords">
-                Lat: {portCoords.lat.toFixed(4)} | Lng: {portCoords.lng.toFixed(4)}
-              </p>
-            </>
+          {/* Supplier Failure */}
+          {activeTab === "supplier" && (
+            <div className="tab-content">
+              <form onSubmit={handleSupplierCheck} className="form">
+                <input type="text" placeholder="Enter supplier name" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} required />
+                <input type="text" placeholder="Enter location" value={supplierLocation} onChange={(e) => setSupplierLocation(e.target.value)} required />
+                <button type="submit" disabled={supplierLoading}>{supplierLoading ? "Checking..." : "Check Supplier"}</button>
+              </form>
+
+              {supplierRisk && (
+                <div className="result-card">
+                  <h3>📊 Risk Level: {supplierRisk}</h3>
+                  {supplierRisk === "High" && <p className="high">🔴 High Risk of Disruption</p>}
+                  {supplierRisk === "Medium" && <p className="moderate">🟠 Medium Risk — Monitor Closely</p>}
+                  {supplierRisk === "Low" && <p className="normal">✅ Low Risk — Looks Stable</p>}
+                </div>
+              )}
+
+              {news.length > 0 && (
+                <div className="news-section">
+                  <h3>📰 Recent News</h3>
+                  <ul>
+                    {news.map((article, idx) => (
+                      <li key={idx}>
+                        <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
+                        <p>🧠 Sentiment: {article.sentiment}</p>
+                        {article.indicators?.length > 0 && <p>⚠️ Issues Detected: {article.indicators.join(", ")}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Demand Surge */}
+          {activeTab === "demand" && (
+            <div className="tab-content">
+              <h2>📈 Demand Surge Detection</h2>
+              <button onClick={handleDemandSurge} disabled={demandLoading}>
+                {demandLoading ? "Analyzing..." : "Detect Demand Surges"}
+              </button>
+
+              {trendingProducts.length > 0 && (
+                <div className="result-card">
+                  <h3>🔥 Trending Products</h3>
+                  <ul>
+                    {trendingProducts.map((item, idx) => (
+                      <li key={idx}>
+                        {item.name} — Demand Score: <strong>{item.score}</strong>{" "}
+                        {item.score > 85 ? "📈 Surge Alert!" : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           )}
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
-};
+}
 
 export default App;
