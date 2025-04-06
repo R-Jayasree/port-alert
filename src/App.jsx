@@ -103,6 +103,11 @@ function App() {
 // Twitter API credentials
 const BEARER_TOKEN = 'bcba328621754156998f315f45c365bf';
 
+import axios from "axios";
+import { HfInference } from "@huggingface/inference";
+
+const hf = new HfInference("8sdghshdjw23rbndscnks");
+
 const fetchTweets = async (query) => {
   const url = `https://api.twitter.com/2/tweets/search/recent?query=${query}&max_results=5`;
 
@@ -119,6 +124,12 @@ const fetchTweets = async (query) => {
       tweets.forEach(tweet => {
         console.log(`- ${tweet.text}`);
       });
+
+      const trendLevel = determineTrendLevel(tweets.length);
+      const trendingAreas = await extractTrendingAreas(tweets);
+
+      console.log(`Trend Level: ${trendLevel}`);
+      console.log(`Trending Areas: ${trendingAreas.join(", ")}`);
     } else {
       console.log("No tweets found for the query.");
     }
@@ -127,7 +138,36 @@ const fetchTweets = async (query) => {
   }
 };
 
-fetchTweets('supply chain');
+const determineTrendLevel = (tweetCount) => {
+  if (tweetCount > 3) {
+    return "High";
+  } else if (tweetCount > 1) {
+    return "Medium";
+  } else {
+    return "Low";
+  }
+};
+
+const extractTrendingAreas = async (tweets) => {
+  let areas = [];
+
+  for (const tweet of tweets) {
+    const text = tweet.text;
+    const nerResults = await hf.tokenClassification({
+      model: "dbmdz/bert-large-cased-finetuned-conll03-english",
+      inputs: text,
+    });
+
+    const locations = nerResults[0].filter(entity => entity.entity === "LOC");
+
+    locations.forEach(loc => {
+      areas.push(loc.word);
+    });
+  }
+
+  return [...new Set(areas)];
+};
+
 
 
   return (
