@@ -98,25 +98,37 @@ function App() {
     }
   };
 
-  const handleDemandSurge = async () => {
-    setDemandLoading(true);
-    setTrendingProducts([]);
-    try {
-      // Simulated trending data
-      const simulatedTrends = [
-        { name: "Electric Scooters", score: 93 },
-        { name: "Solar Panels", score: 88 },
-        { name: "Smart Watches", score: 74 },
-        { name: "Protein Powders", score: 60 },
-        { name: "Plant-Based Meat", score: 91 },
-      ];
-      setTrendingProducts(simulatedTrends);
-    } catch (err) {
-      console.error("Failed to fetch trends");
-    } finally {
-      setDemandLoading(false);
+ const axios = require('axios');
+
+// Twitter API credentials
+const BEARER_TOKEN = 'bcba328621754156998f315f45c365bf';
+
+const fetchTweets = async (query) => {
+  const url = `https://api.twitter.com/2/tweets/search/recent?query=${query}&max_results=5`;
+
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        'Authorization': `Bearer ${BEARER_TOKEN}`,
+      },
+    });
+
+    const tweets = response.data.data;
+    if (tweets) {
+      console.log("Recent Tweets:");
+      tweets.forEach(tweet => {
+        console.log(`- ${tweet.text}`);
+      });
+    } else {
+      console.log("No tweets found for the query.");
     }
-  };
+  } catch (error) {
+    console.error("Error fetching tweets:", error);
+  }
+};
+
+fetchTweets('supply chain');
+
 
   return (
     <>
