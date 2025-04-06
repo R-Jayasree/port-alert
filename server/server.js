@@ -14,7 +14,7 @@ app.post("/api/analyze", async (req, res) => {
     {
       method: "POST",
       headers: {
-        Authorization: "Bearer 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", 
+        Authorization: "", 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
